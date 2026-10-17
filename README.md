@@ -102,7 +102,7 @@ API 명세는 서버 기동 후 `localhost:8080/swagger-ui/index.html` 에서 �
 | [![API](https://img.shields.io/badge/API-1A1A1A?style=for-the-badge)](https://github.com/SO0omin/KINO/wiki/API) | 엔드포인트 명세 |
 | [![Deployment](https://img.shields.io/badge/DEPLOYMENT-1A1A1A?style=for-the-badge)](https://github.com/SO0omin/KINO/wiki/배포) | Docker 구성과 CI/CD 파이프라인 |
 
-## My Contribution
+## 담당
 
 3인 팀 프로젝트에서 결제 도메인과 마이페이지를 담당했습니다.
 
