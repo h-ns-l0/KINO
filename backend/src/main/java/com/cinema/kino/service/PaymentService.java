@@ -1,5 +1,6 @@
 package com.cinema.kino.service;
 
+import com.cinema.kino.client.TossPaymentClient;
 import com.cinema.kino.dto.PaymentDTO;
 import com.cinema.kino.entity.*;
 import com.cinema.kino.entity.enums.*;
@@ -7,16 +8,10 @@ import com.cinema.kino.repository.*;
 import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.client.HttpStatusCodeException;
-import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestTemplate;
 
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -38,12 +33,7 @@ public class PaymentService {
     private final MemberCouponRepository memberCouponRepository;
     private final MemberPointRepository memberPointRepository;
     private final MemberRepository memberRepository;
-
-    @Value("${toss.secret-key}")
-    private String secretKey;
-
-    private static final String TOSS_CONFIRM_URL = "https://api.tosspayments.com/v1/payments/confirm";
-    private static final String TOSS_CANCEL_URL_PREFIX = "https://api.tosspayments.com/v1/payments/";
+    private final TossPaymentClient tossPaymentClient;
 
     private final MailService mailService;
 
@@ -317,7 +307,8 @@ public class PaymentService {
         }
 
         try {
-            executeTossConfirmOrThrow(request);
+            tossPaymentClient.confirmOrThrow(
+                    request.getPaymentKey(), request.getOrderId(), request.getAmount());
         } catch (RuntimeException ex) {
             markPaymentFailed(payment, "pg_confirm_failed");
             releaseHeldCouponIfAny(reservation);
@@ -358,7 +349,7 @@ public class PaymentService {
             log.error("[DB후처리실패] 승인 후 DB 실패. 전액취소 시도. orderId={}", request.getOrderId());
 
             try {
-                executeTossCancelFull(request.getPaymentKey(), "DB update failed after confirm");
+                tossPaymentClient.cancelFull(request.getPaymentKey(), "DB update failed after confirm");
             } catch (Exception cancelEx) {
                 log.error("[보상취소실패] paymentKey={}, err={}", request.getPaymentKey(), cancelEx.getMessage());
             }
@@ -423,73 +414,6 @@ public class PaymentService {
     public String generateBookingNo(Long id) {
         String datePart = LocalDate.now().format(DateTimeFormatter.ofPattern("yyMMdd"));
         return String.format("KINO-%s-%06d", datePart, id);
-    }
-
-    private void executeTossConfirmOrThrow(PaymentDTO.ConfirmRequest request) {
-        RestTemplate restTemplate = new RestTemplate();
-        HttpHeaders headers = createTossHeaders();
-
-        Map<String, Object> body = new HashMap<>();
-        body.put("paymentKey", request.getPaymentKey());
-        body.put("orderId", request.getOrderId());
-        body.put("amount", request.getAmount());
-
-        try {
-            ResponseEntity<String> resp = restTemplate.postForEntity(
-                    TOSS_CONFIRM_URL,
-                    new HttpEntity<>(body, headers),
-                    String.class
-            );
-
-            if (!resp.getStatusCode().is2xxSuccessful()) {
-                throw new RuntimeException("PG 승인 실패 (HTTP " + resp.getStatusCode() + ")");
-            }
-
-            log.info("[토스승인성공] orderId={}, paymentKey={}", request.getOrderId(), request.getPaymentKey());
-
-        } catch (HttpStatusCodeException e) {
-            // 💡 토스가 내려주는 실제 에러 메시지를 로그로 남깁니다.
-            log.error("[토스 에러 응답] HTTP 상태: {}, 응답 본문: {}", e.getStatusCode(), e.getResponseBodyAsString());
-            throw new RuntimeException("토스 결제 승인 실패: " + e.getResponseBodyAsString());
-
-        } catch (RestClientException e) {
-            log.error("[PG사 통신 오류] {}", e.getMessage());
-            throw new RuntimeException("결제 승인 과정에서 PG사 통신 오류가 발생했습니다.");
-        }
-    }
-
-    private void executeTossCancelFull(String paymentKey, String reason) {
-        RestTemplate restTemplate = new RestTemplate();
-        HttpHeaders headers = createTossHeaders();
-
-        Map<String, Object> body = new HashMap<>();
-        body.put("cancelReason", reason);
-
-        String url = TOSS_CANCEL_URL_PREFIX + paymentKey + "/cancel";
-
-        try {
-            ResponseEntity<String> resp = restTemplate.postForEntity(
-                    url,
-                    new HttpEntity<>(body, headers),
-                    String.class
-            );
-
-            if (!resp.getStatusCode().is2xxSuccessful()) {
-                throw new RuntimeException("PG 취소 실패 (HTTP " + resp.getStatusCode() + ")");
-            }
-
-        } catch (RestClientException e) {
-            throw new RuntimeException("PG 취소 통신 오류");
-        }
-    }
-
-    private HttpHeaders createTossHeaders() {
-        HttpHeaders headers = new HttpHeaders();
-        String encodedAuth = Base64.getEncoder()
-                .encodeToString((secretKey + ":").getBytes(StandardCharsets.UTF_8));
-        headers.set("Authorization", "Basic " + encodedAuth);
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        return headers;
     }
 
     private int calculateEarnPoints(Integer finalAmount) {
