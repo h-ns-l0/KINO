@@ -40,6 +40,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-websocket'
     implementation 'org.springframework.boot:spring-boot-starter-security'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    testRuntimeOnly 'com.h2database:h2' // 결제 승인 테스트용 인메모리 DB
 
     implementation 'com.fasterxml.jackson.core:jackson-databind'
     //JWT를 사용하기 위한 의존성 추가
